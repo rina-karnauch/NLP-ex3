@@ -90,7 +90,7 @@ def load_word2vec():
     return wv_from_bin
 
 
-def create_or_load_slim_w2v(words_list, cache_w2v=False):
+def create_or_load_slim_w2v(words_list, cache_w2v=True):
     """
     returns word2vec dict only for words which appear in the dataset.
     :param words_list: list of words to use for the w2v dict
@@ -117,7 +117,14 @@ def get_w2v_average(sent, word_to_vec, embedding_dim):
     :param embedding_dim: the dimension of the word embedding vectors
     :return The average embedding vector as numpy ndarray.
     """
-    return
+    avg_embedding = np.zeros(embedding_dim)
+    empty_vector = np.zeros(embedding_dim)
+    sentence = sent.text
+    for word in sentence:
+        word_vec = word_to_vec.get(word, empty_vector)
+        avg_embedding += word_vec
+    avg_embedding = avg_embedding / len(sentence)
+    return avg_embedding
 
 
 def get_one_hot(size, ind):
@@ -486,18 +493,18 @@ def train_log_linear_with_one_hot():
     plt.show()
 
     # ---------- test model ----------
-    test_model(model, data_manager, model.get_criterion())
+    test_model(model, data_manager, model.get_criterion(), "6")
 
 
-def test_model(model, data_manager, criterion):
+def test_model(model, data_manager, criterion, question_number):
     data_iterator_test = data_manager.get_torch_iterator(TEST)
     y_data_set = [d[1] for d in data_iterator_test.dataset]
 
     test_loss, test_accuracy = evaluate(model, data_iterator_test, criterion)
     predictions_test = np.round(get_predictions_for_data(model, data_iterator_test))
 
-    print("Q6a: test loss: ", test_loss)
-    print("Q6a: test accuracy: ", test_accuracy)
+    print("Q{q}a: test loss: {test_loss}".format(test_loss=test_loss, q=question_number))
+    print("Q{q}a: test accuracy {test_accuracy}: ".format(test_accuracy=test_accuracy, q=question_number))
 
     print(" -------------------------------------- ")
 
@@ -517,8 +524,11 @@ def test_model(model, data_manager, criterion):
         if predictions_test[i] == y_i:
             accuracy_rare += 1
 
-    print("Q6c: accuracy over negated words: ", accuracy_negated / len(negated_polarity_indices))
-    print("Q6d: accuracy over rare words: ", accuracy_rare / len(rare_words_indices))
+    print("Q{q}c: accuracy over negated words: {accuracy_negative}".format(
+        accuracy_negative=accuracy_negated / len(negated_polarity_indices), q=question_number))
+    print(
+        "Q{q}d: accuracy over rare words: {accuracy_rare}".format(accuracy_rare=accuracy_rare / len(rare_words_indices),
+                                                                  q=question_number))
 
     print(" -------------------------------------- ")
 
@@ -528,7 +538,38 @@ def train_log_linear_with_w2v():
     Here comes your code for training and evaluation of the log linear model with word embeddings
     representation.
     """
-    return
+    lr = 0.01
+    n_epochs = 20
+    batch_size = 64
+    weight_decay = 0.001
+
+    input_shape = W2V_EMBEDDING_DIM
+    data_manager = DataManager(batch_size=batch_size, data_type=W2V_AVERAGE, embedding_dim=input_shape)
+    model = LogLinear(input_shape)
+
+    # ---------- plotting ----------
+    train_loss_arr, train_accuracy_arr, validation_loss_arr, validation_accuracy_arr = train_model(model, data_manager,
+                                                                                                   n_epochs,
+                                                                                                   lr, weight_decay)
+
+    # ---------- loss plots ----------
+    plt.figure()
+    plt.plot(train_loss_arr, label="train loss", color="mediumpurple")
+    plt.plot(validation_loss_arr, label="validation loss", color="rebeccapurple")
+    plt.legend()
+    plt.title("training-validation loss with W2V")
+    plt.show()
+
+    # ---------- accuracy plots ----------
+    plt.figure()
+    plt.plot(train_accuracy_arr, label="train accuracy", color="yellowgreen")
+    plt.plot(validation_accuracy_arr, label="validation accuracy", color="olivedrab")
+    plt.title("training-validation accuracy with W2V")
+    plt.legend()
+    plt.show()
+
+    # ---------- test model ----------
+    test_model(model, data_manager, model.get_criterion(), "7")
 
 
 def train_lstm_with_w2v():
@@ -539,6 +580,6 @@ def train_lstm_with_w2v():
 
 
 if __name__ == '__main__':
-    train_log_linear_with_one_hot()
-    # train_log_linear_with_w2v()
+    # train_log_linear_with_one_hot()
+    train_log_linear_with_w2v()
     # train_lstm_with_w2v()
