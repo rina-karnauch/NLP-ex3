@@ -10,6 +10,8 @@ import data_loader
 import pickle
 import tqdm
 
+import matplotlib.pyplot as plt
+
 # ------------------------------------------- Constants ----------------------------------------
 
 SEQ_LEN = 52
@@ -310,6 +312,7 @@ class LogLinear(nn.Module):
         self._nn = nn.Linear(self._in_features, self._out_features)
         self._linear = None
         self._output = None
+        self._criterion = None
 
     def forward(self, x):
         x = x.type(torch.float32)
@@ -318,8 +321,11 @@ class LogLinear(nn.Module):
 
     def predict(self, x):
         self.forward(x)
-        self._output = F.sigmoid(self._linear)
+        self._output = torch.sigmoid(self._linear)
         return self._output
+
+    def get_criterion(self):
+        return self._criterion
 
 
 # ------------------------- training functions -------------
@@ -333,8 +339,14 @@ def binary_accuracy(preds, y):
     :param y: a vector of true labels
     :return: scalar value - (<number of accurate predictions> / <number of examples>)
     """
-    rounded_preds = [round(p) for p in preds]
-    accuracy = len(np.intersect1d(rounded_preds, y)) / len(preds)
+    rounded_preds = [round(p) for p in preds.numpy()]
+
+    count_sames = 0
+    for i in range(len(rounded_preds)):
+        if rounded_preds[i] == y[i]:
+            count_sames += 1
+
+    accuracy = count_sames / len(preds)
     return accuracy
 
 
@@ -347,8 +359,24 @@ def train_epoch(model, data_iterator, optimizer, criterion):
     :param optimizer: the optimizer object for the training process.
     :param criterion: the criterion object for the training process.
     """
+    amount, accuracy, model_loss = 0, 0, 0
 
-    return
+    for x, y in data_iterator:
+        optimizer.zero_grad()
+        pred = torch.flatten(model.forward(x))
+        pred_sigmoid = torch.sigmoid(pred)
+        loss = criterion(pred, y)
+
+        loss.backward()
+        optimizer.step()
+
+        embedded_length = len(x)
+
+        amount += embedded_length
+        accuracy += embedded_length * binary_accuracy(pred_sigmoid.detach(), y.detach())
+        model_loss += float(loss) * embedded_length
+
+    return model_loss / amount, accuracy / amount
 
 
 def evaluate(model, data_iterator, criterion):
@@ -359,7 +387,19 @@ def evaluate(model, data_iterator, criterion):
     :param criterion: the loss criterion used for evaluation
     :return: tuple of (average loss over all examples, average accuracy over all examples)
     """
-    return
+    amount, accuracy, model_loss = 0, 0, 0
+
+    for x, y in data_iterator:
+        pred_sigmoid = torch.flatten(model.predict(x))
+        loss = criterion(pred_sigmoid, y)
+
+        embedded_length = len(x)
+
+        amount += embedded_length
+        accuracy += embedded_length * binary_accuracy(pred_sigmoid.detach(), y.detach())
+        model_loss += float(loss) * embedded_length
+
+    return model_loss / amount, accuracy / amount
 
 
 def get_predictions_for_data(model, data_iter):
@@ -372,7 +412,11 @@ def get_predictions_for_data(model, data_iter):
     :param data_iter: torch iterator as given by the DataManager
     :return:
     """
-    return
+    predictions = np.array([])
+    for x, y in data_iter:
+        pred = torch.flatten(model.predict(x)).detach()
+        predictions = np.append(predictions, pred)
+    return predictions
 
 
 def train_model(model, data_manager, n_epochs, lr, weight_decay=0.):
@@ -385,14 +429,98 @@ def train_model(model, data_manager, n_epochs, lr, weight_decay=0.):
     :param lr: learning rate to be used for optimization
     :param weight_decay: parameter for l2 regularization
     """
-    return
+
+    train_loss_arr, train_accuracy_arr, validation_loss_arr, validation_accuracy_arr = [], [], [], []
+    data_iterator_train = data_manager.get_torch_iterator(TRAIN)
+    data_iterator_validation = data_manager.get_torch_iterator(VAL)
+
+    optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+    criterion = torch.nn.BCEWithLogitsLoss()
+
+    model._criterion = criterion
+
+    for n in tqdm.tqdm(list(range(n_epochs))):
+        train_loss, train_accuracy = train_epoch(model, data_iterator_train, optimizer, criterion)
+        test_loss, test_accuracy = evaluate(model, data_iterator_validation, criterion)
+
+        train_loss_arr.append(train_loss)
+        train_accuracy_arr.append(train_accuracy)
+        validation_loss_arr.append(test_loss)
+        validation_accuracy_arr.append(test_accuracy)
+    return train_loss_arr, train_accuracy_arr, validation_loss_arr, validation_accuracy_arr
 
 
 def train_log_linear_with_one_hot():
     """
     Here comes your code for training and evaluation of the log linear model with one hot representation.
     """
-    return
+
+    lr = 0.01
+    n_epochs = 20
+    batch_size = 64
+    weight_decay = 0.001
+
+    data_manager = DataManager(batch_size=batch_size)
+    input_shape = len(data_manager.sentiment_dataset.get_word_counts())
+    model = LogLinear(input_shape)
+
+    # ---------- plotting ----------
+    train_loss_arr, train_accuracy_arr, validation_loss_arr, validation_accuracy_arr = train_model(model, data_manager,
+                                                                                                   n_epochs,
+                                                                                                   lr, weight_decay)
+
+    # ---------- loss plots ----------
+    plt.figure()
+    plt.plot(train_loss_arr, label="train loss", color="firebrick")
+    plt.plot(validation_loss_arr, label="validation loss", color="rosybrown")
+    plt.legend()
+    plt.title("training-validation loss with OH")
+    plt.show()
+
+    # ---------- accuracy plots ----------
+    plt.figure()
+    plt.plot(train_accuracy_arr, label="train accuracy", color="steelblue")
+    plt.plot(validation_accuracy_arr, label="validation accuracy", color="skyblue")
+    plt.title("training-validation accuracy with OH")
+    plt.legend()
+    plt.show()
+
+    # ---------- test model ----------
+    test_model(model, data_manager, model.get_criterion())
+
+
+def test_model(model, data_manager, criterion):
+    data_iterator_test = data_manager.get_torch_iterator(TEST)
+    y_data_set = [d[1] for d in data_iterator_test.dataset]
+
+    test_loss, test_accuracy = evaluate(model, data_iterator_test, criterion)
+    predictions_test = np.round(get_predictions_for_data(model, data_iterator_test))
+
+    print("Q6a: test loss: ", test_loss)
+    print("Q6a: test accuracy: ", test_accuracy)
+
+    print(" -------------------------------------- ")
+
+    dataset = data_loader.SentimentTreeBank()
+    test_sentences = dataset.get_test_set()
+    negated_polarity_indices = data_loader.get_negated_polarity_examples(test_sentences)
+    rare_words_indices = data_loader.get_rare_words_examples(test_sentences, dataset)
+
+    accuracy_negated = 0
+    for i in negated_polarity_indices:
+        y_i = y_data_set[i]
+        if predictions_test[i] == y_i:
+            accuracy_negated += 1
+    accuracy_rare = 0
+    for i in rare_words_indices:
+        y_i = y_data_set[i]
+        if predictions_test[i] == y_i:
+            accuracy_rare += 1
+
+    print("Q6c: accuracy over negated words: ", accuracy_negated / len(negated_polarity_indices))
+    print("Q6d: accuracy over rare words: ", accuracy_rare / len(rare_words_indices))
+
+    print(" -------------------------------------- ")
 
 
 def train_log_linear_with_w2v():
