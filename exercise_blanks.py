@@ -184,7 +184,20 @@ def sentence_to_embedding(sent, word_to_vec, seq_len, embedding_dim=300):
     :param embedding_dim: the dimension of the w2v embedding
     :return: numpy ndarray of shape (seq_len, embedding_dim) with the representation of the sentence
     """
-    return
+    zero_vector = np.zeros(embedding_dim)
+    sent_to_word_embeddings = []
+    sentence = sent.text
+
+    if len(sentence) > seq_len:
+        sentence = sentence[:seq_len]
+
+    for word in sentence:
+        vec = np.array(word_to_vec.get(word, zero_vector))
+        sent_to_word_embeddings.append(vec)
+
+    while len(sent_to_word_embeddings) < seq_len:
+        sent_to_word_embeddings.append(zero_vector)
+    return np.array(sent_to_word_embeddings)
 
 
 class OnlineDataset(Dataset):
@@ -298,13 +311,33 @@ class LSTM(nn.Module):
     """
 
     def __init__(self, embedding_dim, hidden_dim, n_layers, dropout):
-        return
+        super().__init__()
+        self._output_dim = 1
+        self._embedding_dim = embedding_dim
+        self._hidden_dim = hidden_dim
+        self._n_layers = n_layers
+        self._dropout = dropout
+
+        self._lstm = nn.LSTM(self._embedding_dim, self._hidden_dim, self._n_layers, bidirectional=True,
+                             dropout=self._dropout, batch_first=True)
+        self._nn = nn.Linear(self._hidden_dim * 2, self._output_dim)
+        self._linear = None
+        self._criterion = None
 
     def forward(self, text):
-        return
+        lstm_out, (lstm_h, lstm_c) = self._lstm(text.float())
+        h_n, h_0_r = lstm_h[0], lstm_h[1]
+        concat_hiddens = torch.cat((h_n, h_0_r), dim=1)
+        self._linear = self._nn(concat_hiddens)
+        return self._linear
 
     def predict(self, text):
-        return
+        self.forward(text)
+        self._output = torch.sigmoid(self._linear)
+        return self._output
+
+    def get_criterion(self):
+        return self._criterion
 
 
 class LogLinear(nn.Module):
@@ -576,10 +609,44 @@ def train_lstm_with_w2v():
     """
     Here comes your code for training and evaluation of the LSTM model.
     """
-    return
+    lr = 0.001
+    hidden_dim = 100
+    n_layers = 1
+    dropout = 0.5
+    n_epochs = 4
+    batch_size = 64
+    weight_decay = 0.0001
+
+    input_shape = W2V_EMBEDDING_DIM
+    data_manager = DataManager(batch_size=batch_size, data_type=W2V_SEQUENCE, embedding_dim=input_shape)
+    model = LSTM(input_shape, hidden_dim, n_layers, dropout)
+
+    # ---------- plotting ----------
+    train_loss_arr, train_accuracy_arr, validation_loss_arr, validation_accuracy_arr = train_model(model, data_manager,
+                                                                                                   n_epochs,
+                                                                                                   lr, weight_decay)
+
+    # ---------- loss plots ----------
+    plt.figure()
+    plt.plot(train_loss_arr, label="train loss", color="burlywood")
+    plt.plot(validation_loss_arr, label="validation loss", color="darkgoldenrod")
+    plt.legend()
+    plt.title("training-validation loss with LSTM")
+    plt.show()
+
+    # ---------- accuracy plots ----------
+    plt.figure()
+    plt.plot(train_accuracy_arr, label="train accuracy", color="palevioletred")
+    plt.plot(validation_accuracy_arr, label="validation accuracy", color="crimson")
+    plt.title("training-validation accuracy with LSTM")
+    plt.legend()
+    plt.show()
+
+    # ---------- test model ----------
+    test_model(model, data_manager, model.get_criterion(), "8")
 
 
 if __name__ == '__main__':
-    # train_log_linear_with_one_hot()
+    train_log_linear_with_one_hot()
     train_log_linear_with_w2v()
-    # train_lstm_with_w2v()
+    train_lstm_with_w2v()
